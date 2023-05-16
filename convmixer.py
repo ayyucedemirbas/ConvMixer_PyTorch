@@ -4,7 +4,6 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
-from sklearn.metrics import classification_report, confusion_matrix
 
 batch_size = 32
 img_height = 128
@@ -19,11 +18,13 @@ test_path = "kvasir_dataset/test/"
 train_transform = transforms.Compose([
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
+    transforms.Resize((img_height, img_width)),  
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
 test_transform = transforms.Compose([
+    transforms.Resize((img_height, img_width)), 
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
@@ -68,7 +69,7 @@ test_loader = DataLoader(
 )
 
 class ActivationBlock(nn.Module):
-    def __init__(self):
+    def __init__(self, num_features):
         super(ActivationBlock, self).__init__()
         self.activation = nn.GELU()
         self.batch_norm = nn.BatchNorm2d(num_features)
@@ -92,7 +93,7 @@ class ConvMixerBlock(nn.Module):
         super(ConvMixerBlock, self).__init__()
         self.depthwise_conv = nn.Conv2d(filters, filters, kernel_size=kernel_size, padding=kernel_size//2, groups=filters)
         self.pointwise_conv = nn.Conv2d(filters, filters, kernel_size=1)
-        self.activation_block = ActivationBlock()
+        self.activation_block = ActivationBlock(filters)
 
     def forward(self, x):
         x0 = x
@@ -101,6 +102,7 @@ class ConvMixerBlock(nn.Module):
         x = self.pointwise_conv(x)
         x = self.activation_block(x)
         return x
+
 
 class ConvMixer(nn.Module):
     def __init__(self, image_size, filters, depth, kernel_size, patch_size, num_classes):
@@ -196,9 +198,12 @@ def train(model, train_loader, val_loader, criterion, optimizer, num_epochs):
         print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {train_loss:.4f} - Train Accuracy: {train_accuracy:.2f}% - Val Loss: {val_loss:.4f} - Val Accuracy: {val_accuracy:.2f}%")
 
     model.load_state_dict(torch.load("./checkpoint.pt"))
+    model.eval()
     test_loss = 0.0
     test_correct = 0
     test_total = 0
+    predictions = []
+    labels = []
 
     with torch.no_grad():
         for images, labels in test_loader:
@@ -212,6 +217,9 @@ def train(model, train_loader, val_loader, criterion, optimizer, num_epochs):
             _, predicted = outputs.max(1)
             test_total += labels.size(0)
             test_correct += predicted.eq(labels).sum().item()
+
+            predictions += predicted.tolist()
+            labels += labels.tolist()
 
     test_loss /= len(test_loader)
     test_accuracy = 100.0 * test_correct / test_total
@@ -247,13 +255,10 @@ test_accuracy = 100.0 * test_correct / test_total
 
 print(f"Test Loss: {test_loss:.4f} - Test Accuracy: {test_accuracy:.2f}%")
 
-
+from sklearn.metrics import classification_report, confusion_matrix
 
 class_names = ['dyed-lifted-polyps', 'dyed-resection-margins', 'esophagitis', 'normal', 'polyps', 'ulcerative-colitis']
 print("Confusion Matrix")
 print(confusion_matrix(labels, predictions))
 print("Classification Report")
 print(classification_report(labels, predictions, target_names=class_names))
-
-
-
